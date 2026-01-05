@@ -268,9 +268,108 @@ Based on the original "I'm the Boss!" game:
 - No AI initially - all human players
 
 ## Future Enhancements
-- Online multiplayer via WebSockets
+- ~~Online multiplayer via WebSockets~~ ✅ Implemented
 - AI opponents
 - Game save/load
 - Sound effects
 - Mobile responsive design
 - Tutorial mode
+
+---
+
+## Phase 7: Multiplayer Implementation (NEW)
+
+### 7.1 Architecture Overview
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    WebSocket Server (Node.js)                │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   Room 1    │  │   Room 2    │  │   Room 3    │   ...   │
+│  │ Game State  │  │ Game State  │  │ Game State  │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+└─────────────────────────────────────────────────────────────┘
+         ▲                 ▲                 ▲
+         │ WebSocket       │                 │
+         ▼                 ▼                 ▼
+    ┌─────────┐       ┌─────────┐       ┌─────────┐
+    │ Player 1│       │ Player 2│       │ Player 3│
+    │ Browser │       │ Browser │       │ Browser │
+    │(sees own│       │(sees own│       │(sees own│
+    │ cards)  │       │ cards)  │       │ cards)  │
+    └─────────┘       └─────────┘       └─────────┘
+```
+
+### 7.2 Server Components (`server/`)
+- `server.js` - Main WebSocket server
+- `GameRoom.js` - Room management class
+- `ServerGame.js` - Authoritative game state (adapted from game.js)
+
+### 7.3 Message Protocol
+```javascript
+// Client → Server
+{ type: 'create_room', playerName: 'Alice' }
+{ type: 'join_room', roomCode: 'ABC123', playerName: 'Bob' }
+{ type: 'start_game' }
+{ type: 'roll_die' }
+{ type: 'make_deal' }
+{ type: 'play_card', cardIndex: 0, targetColor?: 'red' }
+{ type: 'make_offer', toPlayerId: 2, amount: 5 }
+{ type: 'respond_offer', accept: true }
+{ type: 'close_deal' }
+{ type: 'end_turn' }
+
+// Server → Client
+{ type: 'room_created', roomCode: 'ABC123', playerId: 0 }
+{ type: 'player_joined', playerName: 'Bob', playerId: 1 }
+{ type: 'game_state', state: {...}, yourHand: [...] }
+{ type: 'action_result', success: true, message: '...' }
+{ type: 'game_over', winner: 'Alice', scores: [...] }
+{ type: 'error', message: '...' }
+```
+
+### 7.4 Security Considerations
+- Server is authoritative (validates all moves)
+- Clients only receive their own hand
+- Other players' hands shown as card count only
+- Room codes are unique 6-character alphanumeric
+
+### 7.5 Client Changes (`js/`)
+- `multiplayer.js` - WebSocket connection manager
+- Modified `main.js` - Detect multiplayer vs local mode
+- Modified `ui.js` - Login/lobby screens
+- Modified `game.js` - Sync with server state
+
+### 7.6 Running Multiplayer
+```bash
+# Terminal 1: Start WebSocket server
+cd /home/makis/Files_wsl/Big_investor
+node server/server.js
+
+# Terminal 2: Start HTTP server for client files
+python3 -m http.server 8080
+
+# Players connect to: http://<server-ip>:8080
+```
+
+### 7.7 Implementation Sprints
+
+#### Sprint 7.1: Server Foundation ✅
+- [x] Node.js WebSocket server setup
+- [x] Room creation/joining
+- [x] Player connection management
+
+#### Sprint 7.2: Game State Sync
+- [ ] Move game logic to server
+- [ ] Broadcast state updates
+- [ ] Handle reconnection
+
+#### Sprint 7.3: Client Integration
+- [ ] Login/lobby UI
+- [ ] WebSocket client wrapper
+- [ ] Replace local game calls with server messages
+
+#### Sprint 7.4: Testing & Polish
+- [ ] Multi-device testing
+- [ ] Error handling
+- [ ] Connection status indicators
+

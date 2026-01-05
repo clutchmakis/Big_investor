@@ -203,7 +203,7 @@ const UI = {
 
     // ==================== Action Buttons ====================
     
-    updateActionButtons(phase, hasRolled) {
+    updateActionButtons(phase, hasRolled, isMyTurn = true) {
         const { btnMakeDeal, btnRollDie, btnDrawCards } = this.elements;
         
         // Reset all
@@ -211,10 +211,13 @@ const UI = {
         btnRollDie.disabled = true;
         btnDrawCards.disabled = true;
         
-        if (phase === GAME_PHASES.TURN_START) {
+        // Only enable if it's the player's turn
+        if (!isMyTurn) return;
+        
+        if (phase === GAME_PHASES.TURN_START || phase === 'turn_start') {
             btnMakeDeal.disabled = false;
             btnRollDie.disabled = false;
-        } else if (phase === GAME_PHASES.ROLLED) {
+        } else if (phase === GAME_PHASES.ROLLED || phase === 'rolled') {
             btnMakeDeal.disabled = false;
             btnDrawCards.disabled = false;
         }
@@ -465,5 +468,171 @@ const UI = {
         });
         
         this.showModal('end-game-modal');
+    },
+
+    // ==================== Multiplayer-specific Methods ====================
+    
+    updatePlayerHandFromServer(playerName, hand, canPlay, onCardClick) {
+        const container = this.elements.playerHand;
+        container.innerHTML = '';
+        
+        this.elements.viewingPlayerName.textContent = playerName + "'s";
+        this.elements.handCount.textContent = hand.length;
+        
+        hand.forEach(card => {
+            const cardEl = this.createCardElementFromServer(card, canPlay);
+            if (canPlay && onCardClick) {
+                cardEl.addEventListener('click', () => onCardClick(card));
+            }
+            container.appendChild(cardEl);
+        });
+    },
+
+    createCardElementFromServer(card, clickable = true) {
+        const div = document.createElement('div');
+        div.className = `card ${card.type}-card`;
+        div.dataset.cardId = card.id;
+        
+        if (!clickable) {
+            div.style.cursor = 'default';
+            div.style.opacity = '0.7';
+        }
+        
+        let colorDisplay = '';
+        if (card.color) {
+            colorDisplay = `<div class="card-color ${COLOR_INFO[card.color].css}"></div>`;
+        }
+        
+        const typeDisplay = {
+            'clan': '👤 CLAN',
+            'travel': '✈️ TRAVEL',
+            'recruitment': '📋 RECRUIT',
+            'boss': '🎩 BOSS',
+            'stop': '🛑 STOP'
+        };
+        
+        div.innerHTML = `
+            <div class="card-type">${typeDisplay[card.type] || card.type}</div>
+            <div class="card-name">${card.displayName}</div>
+            ${colorDisplay}
+        `;
+        
+        return div;
+    },
+
+    openNegotiationFromServer(negState, gameState, isBoss, onOffer, onRespond) {
+        const { space, pot, requiredInvestors, presentInvestors, traveledColors, offers, bossId } = negState;
+        const tile = gameState.currentDealTile;
+        const boss = gameState.players.find(p => p.id === bossId);
+        
+        // Update pot display
+        this.elements.negPot.textContent = formatMoneyShort(pot);
+        this.elements.negDividends.textContent = space.dividends;
+        this.elements.negPrice.textContent = `${tile.sharePrice}M`;
+        
+        // Update boss display
+        this.elements.currentBossDisplay.textContent = boss?.name || 'Unknown';
+        
+        // Update required investors (simplified version)
+        const container = this.elements.requiredList;
+        container.innerHTML = '';
+        
+        requiredInvestors.forEach(color => {
+            const div = document.createElement('div');
+            div.className = 'required-investor';
+            
+            const isTraveled = traveledColors.includes(color);
+            const isPresent = presentInvestors[color];
+            
+            if (isTraveled) {
+                div.classList.add('traveled');
+                div.style.opacity = '0.5';
+                div.style.textDecoration = 'line-through';
+            } else if (isPresent) {
+                div.classList.add('fulfilled');
+            } else {
+                div.classList.add('missing');
+            }
+            
+            div.innerHTML = `
+                <span class="investor-badge ${COLOR_INFO[color].css}">${COLOR_INFO[color].initial}</span>
+                <span class="investor-name">${COLOR_INFO[color].name}</span>
+                ${isTraveled ? '<span class="status">✈️</span>' : isPresent ? '<span class="status">✓</span>' : '<span class="status">?</span>'}
+            `;
+            
+            container.appendChild(div);
+        });
+        
+        // Update offers list for multiplayer
+        this.updateOffersListFromServer(offers, gameState.players, gameState.yourPlayerId, onRespond);
+        
+        // Update offer controls (only show for boss)
+        this.elements.bossOfferControls.style.display = isBoss ? 'flex' : 'none';
+        
+        if (isBoss) {
+            this.updateOfferTargetSelect(gameState.players, bossId);
+        }
+        
+        // Update close deal button
+        this.elements.btnCloseDeal.disabled = !negState.canClose?.canClose;
+        
+        // Only boss can close/fail deal
+        this.elements.btnCloseDeal.style.display = isBoss ? 'block' : 'none';
+        this.elements.btnFailDeal.style.display = isBoss ? 'block' : 'none';
+        
+        this.showModal('negotiation-modal');
+    },
+
+    updateOffersListFromServer(offers, players, myPlayerId, onRespond) {
+        const container = this.elements.offersList;
+        container.innerHTML = '';
+        
+        if (!offers || offers.length === 0) {
+            container.innerHTML = '<div class="no-offers">No offers yet</div>';
+            return;
+        }
+        
+        offers.forEach(offer => {
+            const player = players.find(p => p.id === offer.toPlayerId);
+            const div = document.createElement('div');
+            div.className = 'offer-item';
+            
+            const isMyOffer = offer.toPlayerId === myPlayerId;
+            
+            let statusText = '';
+            if (offer.accepted === true) {
+                statusText = '<span class="offer-status accepted">✓ Accepted</span>';
+            } else if (offer.accepted === false) {
+                statusText = '<span class="offer-status rejected">✗ Rejected</span>';
+            } else if (isMyOffer) {
+                statusText = `
+                    <button class="btn-small btn-accept" onclick="this.disabled=true">Accept</button>
+                    <button class="btn-small btn-reject" onclick="this.disabled=true">Reject</button>
+                `;
+            } else {
+                statusText = '<span class="offer-status pending">Pending...</span>';
+            }
+            
+            div.innerHTML = `
+                <span class="offer-player">${player?.name || 'Unknown'}</span>
+                <span class="offer-amount">${formatMoney(offer.amount)}</span>
+                <div class="offer-actions">${statusText}</div>
+            `;
+            
+            // Add event listeners for accept/reject buttons
+            if (isMyOffer && offer.accepted === null) {
+                const acceptBtn = div.querySelector('.btn-accept');
+                const rejectBtn = div.querySelector('.btn-reject');
+                
+                if (acceptBtn) {
+                    acceptBtn.addEventListener('click', () => onRespond(true));
+                }
+                if (rejectBtn) {
+                    rejectBtn.addEventListener('click', () => onRespond(false));
+                }
+            }
+            
+            container.appendChild(div);
+        });
     }
 };
